@@ -1,0 +1,70 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Historical METAR Explorer V6</title>
+<style>
+:root{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#17202a;background:#f4f6f8}*{box-sizing:border-box}body{margin:0}.wrap{max-width:1200px;margin:auto;padding:16px}.p{background:#fff;border:1px solid #d9dee6;border-radius:14px;padding:15px;margin-bottom:12px}h1{margin:0;font-size:24px}.muted{color:#667085}.grid{display:grid;gap:10px}.controls{grid-template-columns:1fr 1fr auto}input,button,select{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:9px;font:inherit;margin-top:5px}button{background:#17202a;color:#fff;font-weight:800;cursor:pointer}.secondary{background:#fff;color:#17202a}.fav{width:auto;background:#fff;color:#17202a;margin:0}.pill{display:inline-block;color:#fff;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:900}.VFR{background:#2e9b57}.MVFR{background:#2777c9}.IFR{background:#d83b3b}.LIFR{background:#c447a0}.timeline{height:43px;display:flex;overflow:hidden;border-radius:8px;background:#edf0f3;margin-top:10px}.seg{min-width:16px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:900;cursor:pointer;border-right:1px solid #fff6}.obs{display:grid;grid-template-columns:70px 70px 1fr;gap:9px;border:1px solid #e0e5eb;border-left:6px solid #999;border-radius:10px;padding:10px;margin:7px 0}.obs.VFR{border-left-color:#2e9b57}.obs.MVFR{border-left-color:#2777c9}.obs.IFR{border-left-color:#d83b3b}.obs.LIFR{border-left-color:#c447a0}.speci{outline:2px dashed #6b7280}.metrics{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.metric b{display:block;color:#667085;font-size:10px}.metric span{font-size:13px}.raw{grid-column:1/-1;font:11px ui-monospace,monospace;overflow-wrap:anywhere}.stats{display:flex;flex-wrap:wrap;gap:7px}.stat{padding:7px 9px;border:1px solid #e0e5eb;border-radius:8px;font-size:12px}.error{background:#fef3f2;color:#b42318;padding:10px;border-radius:9px}.comparegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}.routegrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px}.routecard{border:1px solid #dce2e8;border-radius:10px;padding:11px}.big{font-size:27px;font-weight:900}.small{font-size:12px}.bar{height:12px;border-radius:6px;background:#edf0f3;overflow:hidden;display:flex}.bar span{height:100%}
+@media(max-width:800px){.controls{grid-template-columns:1fr}.obs{grid-template-columns:55px 65px 1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+</style></head><body><div class="wrap">
+<div class="p"><h1>Historical METAR Explorer <span class="muted">V7</span></h1><div class="muted">Historical aviation weather + route/flight-review mode.</div></div>
+<div class="p"><div class="grid controls"><label>ICAO<input id="icao" maxlength="4" value="KTLH"></label><label>Date<input id="date" type="date"></label><button id="load">Load Weather</button></div><div id="favs" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px"></div></div>
+<div class="p"><div class="stats"><span class="pill VFR">VFR</span><span class="pill MVFR">MVFR</span><span class="pill IFR">IFR</span><span class="pill LIFR">LIFR</span><span class="stat">Dashed outline = SPECI</span><button id="csv" class="secondary" style="width:auto;margin:0">Export CSV</button></div><div id="stats" class="stats" style="margin-top:9px"></div><div id="timeline" class="timeline"></div></div>
+<div class="p"><b>Historical flight review</b><div class="muted small">Enter the airport sequence. The tool samples each airport near the estimated time as the flight progresses between the listed points. This is a weather-review aid, not a navigation or dispatch tool.</div>
+<div class="grid" style="grid-template-columns:2fr 1fr 1fr auto;margin-top:8px"><label>Route / airports<input id="route" value="KTLH,KABY,KDHN"></label><label>Departure UTC<input id="dep" value="18:00" type="time"></label><label>Total elapsed minutes<input id="duration" value="90" type="number" min="1" max="1440"></label><button id="review">Build Review</button></div><div id="routeout" style="margin-top:10px"></div></div>
+<div class="p"><b>Historical reports</b><div id="reports"></div></div>
+<div class="p"><b>Compare airports</b><div class="muted small">Same date, up to six airports.</div><div style="display:grid;grid-template-columns:1fr auto;gap:8px"><input id="airports" value="KTLH,KDHN,KABY,KJAX"><button id="cmp">Compare</button></div><div id="comparison" class="comparegrid" style="margin-top:10px"></div></div>
+<div class="p muted small">V6 uses IEM's historical ASOS/METAR archive. IEM also provides a separate one-minute ASOS archive. The route-review feature samples archived observations at time points; it does not infer conditions between airports or provide a forecast.</div>
+<div id="msg"></div>
+</div>
+<script>
+const $=x=>document.getElementById(x);function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]))}function n(v,s=""){return v==null?"—":v+s}function tm(v){return new Date(v).toISOString().slice(11,16)+"Z"}
+$("date").value=new Date().toISOString().slice(0,10);
+["KTLH","KDHN","KABY","KJAX","KATL","KMCO"].forEach(a=>{let b=document.createElement("button");b.className="fav";b.textContent=a;b.onclick=()=>{$("icao").value=a;load()};$("favs").appendChild(b)});
+let O=[];
+function render(d){O=d.observations;$("stats").innerHTML=Object.keys(d.counts).map(k=>`<span class="stat"><span class="pill ${k}">${k}</span> ${d.counts[k]}</span>`).join("")+`<span class="stat">${d.count} reports</span>`;$("timeline").innerHTML=O.map((o,i)=>`<div class="seg ${o.category}" style="width:${100/O.length}%" onclick="document.getElementById('obs${i}').scrollIntoView({behavior:'smooth',block:'center'})">${tm(o.valid)}</div>`).join("");$("reports").innerHTML=O.map((o,i)=>{let w=o.drct==null?"—":`${String(Math.round(o.drct)).padStart(3,"0")}° / ${n(o.sknt," kt")}${o.gust!=null?" G"+Math.round(o.gust):""}`;return `<div id="obs${i}" class="obs ${o.category} ${o.is_speci?"speci":""}"><b>${tm(o.valid)}</b><span class="pill ${o.category}">${o.category}</span><div class="metrics"><div class="metric"><b>WIND</b><span>${esc(w)}</span></div><div class="metric"><b>VIS</b><span>${n(o.vsby," SM")}</span></div><div class="metric"><b>CEILING</b><span>${o.ceiling==null?"Unlimited":Math.round(o.ceiling)+" ft"}</span></div><div class="metric"><b>TEMP</b><span>${n(o.tmpf,"°F")}</span></div><div class="metric"><b>DEW PT</b><span>${n(o.dwpf,"°F")}</span></div><div class="metric"><b>ALT</b><span>${n(o.altimeter," in")}</span></div><div class="metric"><b>WX</b><span>${esc(o.weather)||"—"}</span></div><div class="raw"><b>${o.is_speci?"SPECI":"METAR"}:</b> ${esc(o.metar)||"No raw report"}</div></div></div>`}).join("")}
+async function load(){try{let r=await fetch(`/api/metar?icao=${$("icao").value}&date=${$("date").value}`),d=await r.json();if(!r.ok)throw Error(d.error);render(d);$("msg").innerHTML=""}catch(e){$("msg").innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+async function review(){let out=$("routeout");out.innerHTML="Loading…";try{let r=await fetch(`/api/route-review?airports=${encodeURIComponent($("route").value)}&date=${$("date").value}&departure=${$("dep").value}&duration=${$("duration").value}`),d=await r.json();if(!r.ok)throw Error(d.error);out.innerHTML=`<div class="routegrid">${d.airports.map(x=>{if(x.error)return `<div class="routecard"><b>${x.icao}</b><div class="error">${esc(x.error)}</div></div>`;let o=x.observation;return `<div class="routecard"><b>${x.icao}</b><div class="muted small">Target ${tm(x.target)}</div><div class="big">${o?`<span class="pill ${o.category}">${o.category}</span>`:"—"}</div>${o?`<div class="small">Wind ${n(o.sknt," kt")}${o.gust!=null?" G"+Math.round(o.gust):""}<br>Visibility ${n(o.vsby," SM")}<br>Ceiling ${o.ceiling==null?"Unlimited":Math.round(o.ceiling)+" ft"}<br>Temp/DP ${n(o.tmpf,"°F")} / ${n(o.dwpf,"°F")}</div><div class="small" style="margin-top:7px">${esc(o.metar)}</div>`:""}</div>`}).join("")}</div>`}catch(e){out.innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+async function compare(){try{let r=await fetch(`/api/compare?airports=${encodeURIComponent($("airports").value)}&date=${$("date").value}`),d=await r.json();if(!r.ok)throw Error(d.error);$("comparison").innerHTML=Object.entries(d.airports).map(([a,v])=>{if(v.error)return `<div class="p"><b>${a}</b><div class="error">${esc(v.error)}</div></div>`;let c={VFR:0,MVFR:0,IFR:0,LIFR:0};v.forEach(x=>c[x.category]++);return `<div class="p"><b>${a}</b><div class="stats" style="margin-top:7px">${Object.keys(c).map(k=>`<span class="stat"><span class="pill ${k}">${k}</span> ${c[k]}</span>`).join("")}</div><div class="timeline">${v.map(x=>`<div class="seg ${x.category}" style="width:${100/v.length}%">${tm(x.valid)}</div>`).join("")}</div></div>`}).join("")}catch(e){$("comparison").innerHTML=`<div class="error">${esc(e.message)}</div>`}}
+$("load").onclick=load;$("review").onclick=review;$("cmp").onclick=compare;$("csv").onclick=()=>location.href=`/api/export?icao=${$("icao").value}&date=${$("date").value}`;load();
+</script>
+<section class="card">
+  <h2>HEMS Flight Review Report</h2>
+  <p class="muted">Generate a printable PDF summary of the selected airport and historical weather period.</p>
+  <div class="controls">
+    <button id="pdfReportBtn">Generate PDF Report</button>
+  </div>
+  <div id="pdfStatus" class="muted"></div>
+</section>
+</body></html>
+
+<script>
+(() => {
+  const btn = document.getElementById("pdfReportBtn");
+  const status = document.getElementById("pdfStatus");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    const get = id => document.getElementById(id);
+    const icao = (get("icao")?.value || "").trim().toUpperCase();
+    const date = get("date")?.value || "";
+    if (!icao || !date) { status.textContent = "Enter an airport and date first."; return; }
+    const params = new URLSearchParams({
+      icao, date,
+      airports: get("route")?.value || "",
+      departure: get("dep")?.value || "",
+      duration: get("duration")?.value || ""
+    });
+    status.textContent = "Generating PDF…";
+    try {
+      const r = await fetch("/api/report?" + params);
+      if (!r.ok) throw new Error(await r.text());
+      const blob = await r.blob();
+      const u = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = u;
+      a.download = `${icao}_${date}_HEMS_weather_review.pdf`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(u);
+      status.textContent = "PDF generated.";
+    } catch (e) {
+      status.textContent = "Report error: " + e;
+    }
+  });
+})();
+</script>
