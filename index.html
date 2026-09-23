@@ -78,7 +78,11 @@ function n(v,s=""){
 
 function tm(v){
 
- return new Date(v).toISOString().slice(11,16)+"Z";
+ const s=String(v);
+
+ const z=s.endsWith("Z") ? s : s.replace(" ","T")+"Z";
+
+ return new Date(z).toISOString().slice(11,16)+"Z";
 
 }
 
