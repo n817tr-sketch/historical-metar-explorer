@@ -441,25 +441,12 @@ pdfBtn.addEventListener("click",async()=>{
 
  }
 
- const params=new URLSearchParams({
+ const url="/api/route-review-tas?airports="+encodeURIComponent(airports.join(","))+
+  "&date="+encodeURIComponent(date)+
+  "&departure="+encodeURIComponent(dep)+
+  "&tas="+encodeURIComponent(String(tas));
 
-   icao,
-
-   date,
-
-   airports:$("route").value||"",
-
-   departure:$("dep").value||"",
-
-   duration:""
-
- });
-
- pdfStatus.textContent="Generating PDF…";
-
- try{
-
-   const r=await fetch("/api/report?"+params);
+const r=await fetch(url);
 
    if(!r.ok)throw new Error(await r.text());
 
