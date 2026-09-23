@@ -278,5 +278,141 @@ def generate_report():
     return send_file(buf, mimetype="application/pdf", as_attachment=True, download_name=f"{icao}_{date}_HEMS_weather_review.pdf")
 
 
+def great_circle_nm(lat1, lon1, lat2, lon2):
+    from math import radians, sin, cos, asin, sqrt
+    r = 3440.065
+    p1, p2 = radians(lat1), radians(lat2)
+    dp = radians(lat2 - lat1)
+    dl = radians(lon2 - lon1)
+    a = sin(dp / 2) ** 2 + cos(p1) * cos(p2) * sin(dl / 2) ** 2
+    return 2 * r * asin(sqrt(a))
+
+
+@app.get("/api/route-review-tas")
+def route_review_tas():
+    airports = [
+        x.strip().upper()
+        for x in request.args.get("airports", "").split(",")
+        if x.strip()
+    ][:8]
+
+    date = request.args.get("date", "")
+    dep = request.args.get("departure", "")
+
+    try:
+        tas = float(request.args.get("tas", "160") or 160)
+    except ValueError:
+        return jsonify(error="True airspeed must be a number."), 400
+
+    if len(airports) < 2:
+        return jsonify(error="Enter at least two airports."), 400
+
+    if tas < 40 or tas > 250:
+        return jsonify(error="True airspeed must be between 40 and 250 kt."), 400
+
+    if not re.fullmatch(r"\d{2}:\d{2}", dep or ""):
+        return jsonify(error="Use a Zulu departure time such as 18:00."), 400
+
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+        hh, mm = [int(x) for x in dep.split(":")]
+
+        if hh > 23 or mm > 59:
+            raise ValueError
+
+        start = datetime.strptime(
+            f"{date} {dep}",
+            "%Y-%m-%d %H:%M"
+        ).replace(tzinfo=timezone.utc)
+
+    except ValueError:
+        return jsonify(
+            error="Use a valid date and Zulu departure time such as 18:00."
+        ), 400
+
+    coords = {
+        "KTLH": (30.3965, -84.3503),
+        "KABY": (31.5355, -84.1945),
+        "KDHN": (31.3213, -85.4496),
+        "KJAX": (30.4941, -81.6879),
+        "KATL": (33.6407, -84.4277),
+        "KMCO": (28.4294, -81.3089),
+    }
+
+    missing = [a for a in airports if a not in coords]
+
+    if missing:
+        return jsonify(
+            error=f"No route coordinates are configured for: {', '.join(missing)}."
+        ), 400
+
+    legs = []
+    elapsed = 0.0
+
+    for i in range(len(airports) - 1):
+        a = airports[i]
+        b = airports[i + 1]
+
+        nm = great_circle_nm(
+            *coords[a],
+            *coords[b]
+        )
+
+        minutes = nm / tas * 60.0
+        elapsed += minutes
+
+        target = start + timedelta(minutes=elapsed)
+
+        legs.append({
+            "from": a,
+            "to": b,
+            "distance_nm": round(nm, 1),
+            "minutes": round(minutes, 1),
+            "target": target.isoformat().replace("+00:00", "Z")
+        })
+
+    result = []
+
+    for i, a in enumerate(airports):
+
+        if i == 0:
+            target = start
+        else:
+            target = start + timedelta(
+                minutes=sum(x["minutes"] for x in legs[:i])
+            )
+
+        target_date = target.strftime("%Y-%m-%d")
+
+        try:
+            obs = fetch(a, target_date)
+
+            near = nearest(
+                obs,
+                target.isoformat().replace("+00:00", "Z")
+            )
+
+            result.append({
+                "icao": a,
+                "target": target.isoformat().replace("+00:00", "Z"),
+                "observation": near
+            })
+
+        except Exception as e:
+            result.append({
+                "icao": a,
+                "target": target.isoformat().replace("+00:00", "Z"),
+                "error": str(e)
+            })
+
+    return jsonify(
+        date=date,
+        departure=dep,
+        tas=tas,
+        duration=round(elapsed, 1),
+        legs=legs,
+        airports=result
+    )
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
