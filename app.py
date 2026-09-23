@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request, render_template, Response, send_file
-import csv, io, requests, re
+import csv, io, requests, re, time
 from datetime import datetime, timedelta, timezone
 
 app = Flask(__name__)
@@ -45,15 +45,38 @@ def fetch(icao, date):
         ("report_type", "3"),
         ("report_type", "4"),
     ]
-    r = requests.get(IEM, params=p, timeout=45)
-    r.raise_for_status()
+
+    for attempt in range(4):
+        try:
+            r = requests.get(
+                IEM,
+                params=p,
+                timeout=45,
+                headers={"User-Agent": "Historical-METAR-Explorer/1.0"}
+            )
+
+            if r.status_code == 429:
+                if attempt < 3:
+                    time.sleep(10 * (attempt + 1))
+                    continue
+
+            r.raise_for_status()
+            break
+
+        except requests.RequestException:
+            if attempt == 3:
+                raise
+            time.sleep(5 * (attempt + 1))
+
     out = []
     for x in csv.DictReader(io.StringIO(r.text)):
         if not x.get("valid"):
             continue
+
         c = ceiling(x)
         v = num(x.get("vsby"))
         raw = x.get("metar") or ""
+
         out.append({
             "valid": x["valid"],
             "category": category(v, c),
@@ -69,8 +92,8 @@ def fetch(icao, date):
             "metar": raw,
             "is_speci": bool(re.search(r"\bSPECI\b", raw)),
         })
-    return sorted(out, key=lambda z: z["valid"])
 
+    return sorted(out, key=lambda z: z["valid"])
 
 def nearest(obs, iso):
     if not obs:
@@ -78,7 +101,122 @@ def nearest(obs, iso):
     t = datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp()
     return min(obs, key=lambda x: abs(datetime.fromisoformat(x["valid"].replace("Z", "+00:00")).timestamp() - t))
 
+def great_circle_nm(lat1, lon1, lat2, lon2):
+    from math import radians, sin, cos, asin, sqrt
+    r = 3440.065
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * r * asin(sqrt(a))
 
+
+@app.get("/api/route-review-tas")
+def route_review_tas():
+    airports = [x.strip().upper() for x in request.args.get("airports", "").split(",") if x.strip()]
+    date = request.args.get("date", "")
+    dep = request.args.get("departure", "")
+    
+    try:
+        tas = float(request.args.get("tas", "160"))
+    except ValueError:
+        return jsonify(error="Invalid true airspeed."), 400
+
+    if len(airports) < 2:
+        return jsonify(error="Enter at least two airports."), 400
+
+    if tas < 40 or tas > 250:
+        return jsonify(error="True airspeed must be between 40 and 250 knots."), 400
+
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+        departure = datetime.strptime(dep, "%H:%M").replace(
+            year=int(date[:4]),
+            month=int(date[5:7]),
+            day=int(date[8:10]),
+            tzinfo=timezone.utc
+        )
+    except ValueError:
+        return jsonify(error="Invalid date or departure time."), 400
+
+    coords = {
+        "KTLH": (30.3965, -84.3503),
+        "KABY": (31.5355, -84.1945),
+        "KDHN": (31.3213, -85.4496),
+        "KJAX": (30.4941, -81.6879),
+        "KATL": (33.6407, -84.4277),
+        "KMCO": (28.4294, -81.3089),
+    }
+
+    for airport in airports:
+        if airport not in coords:
+            return jsonify(error=f"No coordinates available for {airport}."), 400
+
+    legs = []
+    elapsed_minutes = 0
+
+    for i in range(len(airports) - 1):
+        a = airports[i]
+        b = airports[i + 1]
+
+        distance = great_circle_nm(
+            coords[a][0], coords[a][1],
+            coords[b][0], coords[b][1]
+        )
+
+        minutes = distance / tas * 60
+        elapsed_minutes += minutes
+
+        legs.append({
+            "from": a,
+            "to": b,
+            "distance_nm": round(distance, 1),
+            "minutes": round(minutes, 1)
+        })
+
+    results = []
+
+    for i, airport in enumerate(airports):
+        if i > 0:
+            time.sleep(3)
+
+        target = departure + timedelta(
+            minutes=sum(leg["minutes"] for leg in legs[:i])
+        )
+
+        weather = None
+
+        for attempt in range(4):
+            try:
+                weather = fetch(airport, date)
+                break
+            except requests.HTTPError as e:
+                if getattr(e.response, "status_code", None) != 429:
+                    raise
+                if attempt == 3:
+                    return jsonify(
+                        error=f"IEM is still rate-limiting requests for {airport}. Please wait a little while and try again."
+                    ), 429
+                time.sleep(10 * (attempt + 1))
+
+        nearest_obs = nearest(
+            weather,
+            target.strftime("%Y-%m-%dT%H:%M:%SZ")
+        )
+
+        results.append({
+            "icao": airport,
+            "target": target.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "observation": nearest_obs
+        })
+
+    return jsonify({
+        "date": date,
+        "departure": dep,
+        "tas": tas,
+        "duration": round(elapsed_minutes, 1),
+        "legs": legs,
+        "airports": results
+    })
 @app.get("/")
 def home():
     return render_template("index.html")
