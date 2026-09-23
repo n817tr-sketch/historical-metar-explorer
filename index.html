@@ -264,7 +264,7 @@ async function review(){
 
  const out=$("routeout");
 
- out.innerHTML="Calculating route…";
+ out.innerHTML="Loading route review…";
 
  try{
 
@@ -282,75 +282,34 @@ async function review(){
 
    if(!Number.isFinite(tas)||tas<40||tas>250)throw Error("True airspeed must be between 40 and 250 kt.");
 
-   for(const a of airports){
+   const params=new URLSearchParams({
+     airports:airports.join(","),
+     date:date,
+     departure:dep,
+     tas:String(tas)
+   });
 
-     if(!coords[a])throw Error(`No coordinates are configured for ${a}.`);
+   const r=await fetch(`/api/route-review-tas?${params.toString()}`);
 
-   }
+   const d=await r.json();
 
-   let elapsed=0;
-
-   let legs=[];
-
-   let observations=[];
-
-   for(let i=0;i<airports.length;i++){
-
-     const a=airports[i];
-
-     if(i>0){
-
-       const prev=airports[i-1];
-
-       const dist=greatCircleNM(coords[prev],coords[a]);
-
-       const minutes=dist/tas*60;
-
-       legs.push({from:prev,to:a,distance:dist,minutes});
-
-       elapsed+=minutes;
-
-     }
-
-     const target=targetTime(date,dep,elapsed);
-
-     const r=await fetch(`/api/metar?icao=${a}&date=${date}`);
-
-     const d=await r.json();
-
-     if(!r.ok)throw Error(d.error||`Unable to load ${a}.`);
-
-     const o=nearestObservation(d.observations,target);
-
-     observations.push({
-
-       icao:a,
-
-       target,
-
-       observation:o
-
-     });
-
-   }
-
-   let total=elapsed;
+   if(!r.ok)throw Error(d.error||"Unable to build route review.");
 
    out.innerHTML=
 
    `<div class="stats">
 
-     <span class="stat"><b>Departure:</b> ${esc(dep)} Z</span>
+     <span class="stat"><b>Departure:</b> ${esc(d.departure)} Z</span>
 
-     <span class="stat"><b>TAS:</b> ${tas} kt</span>
+     <span class="stat"><b>TAS:</b> ${d.tas} kt</span>
 
-     <span class="stat"><b>Total elapsed:</b> ${total.toFixed(1)} min</span>
+     <span class="stat"><b>Total elapsed:</b> ${Number(d.duration).toFixed(1)} min</span>
 
    </div>
 
    <div class="routegrid" style="margin-top:10px">
 
-   ${observations.map(x=>{
+   ${d.airports.map(x=>{
 
       if(!x.observation){
 
@@ -364,7 +323,7 @@ async function review(){
 
        <b>${x.icao}</b>
 
-       <div class="muted small">Estimated time ${x.target.toISOString().slice(11,16)}Z</div>
+       <div class="muted small">Estimated time ${x.target.slice(11,16)}Z</div>
 
        <div style="margin-top:7px"><span class="pill ${o.category}">${o.category}</span></div>
 
@@ -394,9 +353,9 @@ async function review(){
 
    <b>Route legs</b>
 
-   ${legs.map(l=>
+   ${d.legs.map(l=>
 
-     `<div class="leg"><b>${l.from} → ${l.to}</b> — ${l.distance.toFixed(1)} NM · ${l.minutes.toFixed(1)} min at ${tas} kt</div>`
+     `<div class="leg"><b>${l.from} → ${l.to}</b> — ${Number(l.distance_nm).toFixed(1)} NM · ${Number(l.minutes).toFixed(1)} min at ${d.tas} kt</div>`
 
    ).join("")}
 
