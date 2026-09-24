@@ -25,32 +25,8 @@
 <div class="grid route-controls">
 
 <label>Route / airports<input id="route" value="KTLH,KABY,KDHN"></label>
-<label>Departure Zulu<select id="dep">
-<option value="00:00">00:00 Z</option>
-<option value="01:00">01:00 Z</option>
-<option value="02:00">02:00 Z</option>
-<option value="03:00">03:00 Z</option>
-<option value="04:00">04:00 Z</option>
-<option value="05:00">05:00 Z</option>
-<option value="06:00">06:00 Z</option>
-<option value="07:00">07:00 Z</option>
-<option value="08:00">08:00 Z</option>
-<option value="09:00">09:00 Z</option>
-<option value="10:00">10:00 Z</option>
-<option value="11:00">11:00 Z</option>
-<option value="12:00">12:00 Z</option>
-<option value="13:00">13:00 Z</option>
-<option value="14:00">14:00 Z</option>
-<option value="15:00">15:00 Z</option>
-<option value="16:00">16:00 Z</option>
-<option value="17:00">17:00 Z</option>
-<option value="18:00" selected>18:00 Z</option>
-<option value="19:00">19:00 Z</option>
-<option value="20:00">20:00 Z</option>
-<option value="21:00">21:00 Z</option>
-<option value="22:00">22:00 Z</option>
-<option value="23:00">23:00 Z</option>
-</select></label>
+
+<label>Departure Zulu<select id="dep"></select></label>
 
 <label>True Airspeed (kt)<input id="tas" value="160" type="number" min="40" max="250" step="1"></label>
 
@@ -102,11 +78,7 @@ function n(v,s=""){
 
 function tm(v){
 
- const s=String(v);
-
- const z=s.endsWith("Z") ? s : s.replace(" ","T")+"Z";
-
- return new Date(z).toISOString().slice(11,16)+"Z";
+ return new Date(v).toISOString().slice(11,16)+"Z";
 
 }
 
@@ -434,36 +406,56 @@ async function compare(){
  }catch(e){
 
    $("comparison").innerHTML=`<div class="error">${esc(e.message)}</div>`;
-  
-}
- 
+
  }
- const pdfBtn=document.getElementById("pdfReportBtn");
+
+}
+
+$("load").onclick=load;
+
+$("review").onclick=review;
+
+$("cmp").onclick=compare;
+
+$("csv").onclick=()=>location.href=`/api/export?icao=${$("icao").value}&date=${$("date").value}`;
+
+const pdfBtn=document.getElementById("pdfReportBtn");
 
 const pdfStatus=document.getElementById("pdfStatus");
 
 pdfBtn.addEventListener("click",async()=>{
 
+ const icao=$("icao").value.trim().toUpperCase();
+
+ const date=$("date").value;
+
+ if(!icao||!date){
+
+   pdfStatus.textContent="Enter an airport and date first.";
+
+   return;
+
+ }
+
+ const params=new URLSearchParams({
+
+   icao,
+
+   date,
+
+   airports:$("route").value||"",
+
+   departure:$("dep").value||"",
+
+   duration:""
+
+ });
+
+ pdfStatus.textContent="Generating PDF…";
+
  try{
 
-   const icao=$("icao").value.trim().toUpperCase();
-
-   const date=$("date").value;
-
-   if(!icao||!date){
-
-     pdfStatus.textContent="Enter an airport and date first.";
-
-     return;
-
-   }
-
-   const url="/api/route-review?airports="+encodeURIComponent(icao)+
-     "&date="+encodeURIComponent(date)+
-     "&departure=18:00"+
-     "&duration=60";
-
-   const r=await fetch(url);
+   const r=await fetch("/api/report?"+params);
 
    if(!r.ok)throw new Error(await r.text());
 
@@ -494,15 +486,6 @@ pdfBtn.addEventListener("click",async()=>{
  }
 
 });
-
-$("load").onclick=load;
-
-$("review").onclick=review;
-
-$("cmp").onclick=compare;
-
-$("csv").onclick=()=>location.href=`/api/export?icao=${$("icao").value}&date=${$("date").value}`;
-
 
 load();
 
