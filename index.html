@@ -434,43 +434,34 @@ async function compare(){
  }catch(e){
 
    $("comparison").innerHTML=`<div class="error">${esc(e.message)}</div>`;
+  
 
- }
-
-}
-
-$("load").onclick=load;
-
-$("review").onclick=review;
-
-$("cmp").onclick=compare;
-
-$("csv").onclick=()=>location.href=`/api/export?icao=${$("icao").value}&date=${$("date").value}`;
-
-const pdfBtn=document.getElementById("pdfReportBtn");
+ const pdfBtn=document.getElementById("pdfReportBtn");
 
 const pdfStatus=document.getElementById("pdfStatus");
 
 pdfBtn.addEventListener("click",async()=>{
 
- const icao=$("icao").value.trim().toUpperCase();
+ try{
 
- const date=$("date").value;
+   const icao=$("icao").value.trim().toUpperCase();
 
- if(!icao||!date){
+   const date=$("date").value;
 
-   pdfStatus.textContent="Enter an airport and date first.";
+   if(!icao||!date){
 
-   return;
+     pdfStatus.textContent="Enter an airport and date first.";
 
- }
+     return;
 
- const url="/api/route-review-tas?airports="+encodeURIComponent(airports.join(","))+
-  "&date="+encodeURIComponent(date)+
-  "&departure="+encodeURIComponent(dep)+
-  "&tas="+encodeURIComponent(String(tas));
+   }
 
-const r=await fetch(url);
+   const url="/api/route-review?airports="+encodeURIComponent(icao)+
+     "&date="+encodeURIComponent(date)+
+     "&departure=18:00"+
+     "&duration=60";
+
+   const r=await fetch(url);
 
    if(!r.ok)throw new Error(await r.text());
 
@@ -501,6 +492,15 @@ const r=await fetch(url);
  }
 
 });
+
+$("load").onclick=load;
+
+$("review").onclick=review;
+
+$("cmp").onclick=compare;
+
+$("csv").onclick=()=>location.href=`/api/export?icao=${$("icao").value}&date=${$("date").value}`;
+
 
 load();
 
